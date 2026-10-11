@@ -1,0 +1,190 @@
+import React, { useMemo, useRef, useState } from "react";
+import { FileText, Upload, Download, Trash2, Sparkles, Search, Printer, Table2 } from "lucide-react";
+
+export default function App() {
+  const inputRef = useRef(null);
+  const [fileName, setFileName] = useState("");
+  const [rows, setRows] = useState([]);
+  const [delimiter, setDelimiter] = useState(",");
+  const [query, setQuery] = useState("");
+  const [title, setTitle] = useState("Αναφορά δεδομένων CSV");
+  const [orientation, setOrientation] = useState("landscape");
+  const [fontSize, setFontSize] = useState(10);
+  const [striped, setStriped] = useState(true);
+  const [compact, setCompact] = useState(false);
+  const [status, setStatus] = useState("Επιλέξτε ένα αρχείο CSV.");
+
+  const parseCSV = (text, sep) => {
+    const result = [];
+    let row = [];
+    let cell = "";
+    let quoted = false;
+
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      const next = text[i + 1];
+
+      if (ch === '"' && quoted && next === '"') {
+        cell += '"';
+        i++;
+      } else if (ch === '"') {
+        quoted = !quoted;
+      } else if (ch === sep && !quoted) {
+        row.push(cell.trim());
+        cell = "";
+      } else if ((ch === "\n" || ch === "\r") && !quoted) {
+        if (ch === "\r" && next === "\n") i++;
+        row.push(cell.trim());
+        if (row.some((value) => value !== "")) result.push(row);
+        row = [];
+        cell = "";
+      } else {
+        cell += ch;
+      }
+    }
+
+    row.push(cell.trim());
+    if (row.some((value) => value !== "")) result.push(row);
+
+    const width = Math.max(0, ...result.map((r) => r.length));
+    return result.map((r) => [...r, ...Array(Math.max(0, width - r.length)).fill("")]);
+  };
+
+  const loadFile = async (file) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      setStatus("Σφάλμα: επιλέξτε αρχείο .csv");
+      return;
+    }
+    const text = await file.text();
+    const parsed = parseCSV(text.replace(/^\uFEFF/, ""), delimiter);
+    setRows(parsed);
+    setFileName(file.name);
+    setTitle(file.name.replace(/\.csv$/i, ""));
+    setStatus(`Φορτώθηκαν ${Math.max(0, parsed.length - 1)} εγγραφές και ${parsed[0]?.length || 0} στήλες.`);
+  };
+
+  const filteredRows = useMemo(() => {
+    if (!rows.length || !query.trim()) return rows;
+    const q = query.toLocaleLowerCase("el");
+    return [rows[0], ...rows.slice(1).filter((row) => row.some((cell) => String(cell).toLocaleLowerCase("el").includes(q)))];
+  }, [rows, query]);
+
+  const cleanWithAI = () => {
+    if (!rows.length) return;
+    const cleaned = rows
+      .map((row) => row.map((cell) => String(cell).replace(/\s+/g, " ").trim()))
+      .filter((row, index, all) => index === 0 || row.some(Boolean))
+      .filter((row, index, all) => index === 0 || all.findIndex((r) => JSON.stringify(r) === JSON.stringify(row)) === index);
+    setRows(cleaned);
+    setStatus("Ο offline AI βοηθός αφαίρεσε περιττά κενά, κενές γραμμές και διπλότυπες εγγραφές.");
+  };
+
+  const clearAll = () => {
+    setRows([]);
+    setFileName("");
+    setQuery("");
+    setStatus("Επιλέξτε ένα αρχείο CSV.");
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  const exportPDF = () => {
+    if (!filteredRows.length) return;
+    window.print();
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      <style>{`
+        @media print {
+          @page { size: ${orientation}; margin: 12mm; }
+          body { background: white !important; }
+          .no-print { display: none !important; }
+          .print-area { display: block !important; box-shadow: none !important; border: 0 !important; margin: 0 !important; padding: 0 !important; color: #111827 !important; }
+          .print-area table { font-size: ${fontSize}px !important; }
+          .print-area th { background: #1e3a8a !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .print-area tr:nth-child(even) { background: ${striped ? "#eef2ff" : "white"} !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+      `}</style>
+
+      <header className="no-print border-b border-white/10 bg-slate-900/80 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4">
+          <div className="flex items-center gap-3">
+            <div className="rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-600 p-3 shadow-lg shadow-blue-500/20"><FileText size={24} /></div>
+            <div><h1 className="text-xl font-bold">AI CSV → PDF</h1><p className="text-sm text-slate-400">Τοπικό, ιδιωτικό και χωρίς αποστολή δεδομένων</p></div>
+          </div>
+          <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-300">OFFLINE MODE</span>
+        </div>
+      </header>
+
+      <main className="mx-auto grid max-w-7xl gap-5 p-5 lg:grid-cols-[330px_1fr]">
+        <aside className="no-print space-y-4">
+          <section className="rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-xl">
+            <h2 className="mb-3 flex items-center gap-2 font-semibold"><Upload size={18} /> Εισαγωγή CSV</h2>
+            <input ref={inputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => loadFile(e.target.files?.[0])} />
+            <button onClick={() => inputRef.current?.click()} className="w-full rounded-xl border-2 border-dashed border-blue-400/40 bg-blue-500/5 p-6 text-center transition hover:border-blue-400 hover:bg-blue-500/10">
+              <Upload className="mx-auto mb-2 text-blue-400" />
+              <span className="block font-medium">Επιλογή αρχείου CSV</span>
+              <span className="mt-1 block truncate text-xs text-slate-400">{fileName || "CSV UTF-8"}</span>
+            </button>
+            <label className="mt-4 block text-sm text-slate-300">Διαχωριστικό</label>
+            <select value={delimiter} onChange={(e) => setDelimiter(e.target.value)} className="mt-1 w-full rounded-xl border border-white/10 bg-slate-800 p-2.5">
+              <option value=",">Κόμμα (,)</option><option value=";">Ερωτηματικό (;)</option><option value="\t">Tab</option><option value="|">Κάθετη γραμμή (|)</option>
+            </select>
+          </section>
+
+          <section className="rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-xl">
+            <h2 className="mb-3 flex items-center gap-2 font-semibold"><Sparkles size={18} /> AI εργαλεία</h2>
+            <button onClick={cleanWithAI} disabled={!rows.length} className="w-full rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 px-4 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-40">Έξυπνος καθαρισμός</button>
+            <p className="mt-2 text-xs leading-5 text-slate-400">Λειτουργεί τοπικά: αφαιρεί κενά, άδειες γραμμές και διπλότυπα.</p>
+          </section>
+
+          <section className="rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-xl">
+            <h2 className="mb-3 font-semibold">Ρυθμίσεις PDF</h2>
+            <label className="block text-sm text-slate-300">Τίτλος</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1 w-full rounded-xl border border-white/10 bg-slate-800 p-2.5" />
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button onClick={() => setOrientation("portrait")} className={`rounded-xl p-2 text-sm ${orientation === "portrait" ? "bg-blue-600" : "bg-slate-800"}`}>Κατακόρυφα</button>
+              <button onClick={() => setOrientation("landscape")} className={`rounded-xl p-2 text-sm ${orientation === "landscape" ? "bg-blue-600" : "bg-slate-800"}`}>Οριζόντια</button>
+            </div>
+            <label className="mt-3 block text-sm text-slate-300">Μέγεθος γραμματοσειράς: {fontSize}px</label>
+            <input type="range" min="7" max="14" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} className="w-full accent-blue-500" />
+            <label className="mt-3 flex items-center gap-2 text-sm"><input type="checkbox" checked={striped} onChange={(e) => setStriped(e.target.checked)} /> Εναλλασσόμενες γραμμές</label>
+            <label className="mt-2 flex items-center gap-2 text-sm"><input type="checkbox" checked={compact} onChange={(e) => setCompact(e.target.checked)} /> Συμπαγής πίνακας</label>
+          </section>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={clearAll} className="flex items-center justify-center gap-2 rounded-xl bg-slate-800 p-3 hover:bg-red-500/20"><Trash2 size={17} /> Καθαρισμός</button>
+            <button onClick={exportPDF} disabled={!rows.length} className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 p-3 font-semibold disabled:opacity-40"><Download size={17} /> PDF</button>
+          </div>
+        </aside>
+
+        <section className="min-w-0">
+          <div className="no-print mb-4 flex flex-col gap-3 rounded-2xl border border-white/10 bg-slate-900 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div><p className="text-sm font-medium">{status}</p><p className="text-xs text-slate-500">Η εξαγωγή ανοίγει το παράθυρο εκτύπωσης. Επιλέξτε “Αποθήκευση ως PDF”.</p></div>
+            <div className="relative min-w-[230px]"><Search className="absolute left-3 top-2.5 text-slate-500" size={18} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Αναζήτηση..." className="w-full rounded-xl border border-white/10 bg-slate-800 py-2 pl-10 pr-3" /></div>
+          </div>
+
+          <article className="print-area min-h-[650px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 text-slate-900 shadow-2xl">
+            <div className="mb-5 flex items-start justify-between border-b border-slate-200 pb-4">
+              <div><h2 className="text-2xl font-bold text-blue-900">{title || "Αναφορά CSV"}</h2><p className="mt-1 text-sm text-slate-500">{filteredRows.length ? `${Math.max(0, filteredRows.length - 1)} εγγραφές` : "Δεν υπάρχουν δεδομένα"}</p></div>
+              <Table2 className="text-blue-700" />
+            </div>
+
+            {filteredRows.length ? (
+              <div className="overflow-auto">
+                <table className="w-full border-collapse" style={{ fontSize }}>
+                  <thead><tr>{filteredRows[0].map((cell, i) => <th key={i} className={`border border-blue-900 bg-blue-900 text-left text-white ${compact ? "p-1.5" : "p-2.5"}`}>{cell || `Στήλη ${i + 1}`}</th>)}</tr></thead>
+                  <tbody>{filteredRows.slice(1).map((row, r) => <tr key={r} className={striped && r % 2 ? "bg-indigo-50" : "bg-white"}>{row.map((cell, c) => <td key={c} className={`break-words border border-slate-300 align-top ${compact ? "p-1.5" : "p-2.5"}`}>{cell}</td>)}</tr>)}</tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="flex min-h-[480px] flex-col items-center justify-center text-center text-slate-400"><Printer size={46} className="mb-3" /><p className="font-medium">Η προεπισκόπηση PDF θα εμφανιστεί εδώ</p><p className="text-sm">Εισαγάγετε ένα αρχείο CSV για να ξεκινήσετε.</p></div>
+            )}
+            <footer className="mt-5 border-t border-slate-200 pt-3 text-center text-xs text-slate-400">Δημιουργήθηκε τοπικά με το AI CSV → PDF</footer>
+          </article>
+        </section>
+      </main>
+    </div>
+  );
+}
